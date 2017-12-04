@@ -1,4 +1,3 @@
-
 /*
   DMX_Master.ino - Example code for using the Conceptinetics DMX library
   Copyright (c) 2013 W.A. van der Meeren <danny@illogic.nl>.  All right reserved.
@@ -18,16 +17,15 @@
   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 
-//MIDI INCLUDES
-#include <MIDI.h>
 
+//Serial include
+#include <SoftwareSerial.h>
 
 //DMX Includes
-#include <Conceptinetics.h>
-#include <Rdm_Defines.h>
-#include <Rdm_Uid.h>
+#include "Conceptinetics.h"
 
-
+//MIDI INCLUDES
+#include <MIDI.h>
 
 //MIDI defines
 
@@ -36,8 +34,9 @@
 #define MIDI_OFFSET 12
 
 //MIDI globals
+SoftwareSerial midiSerial(10,11);
 
-MIDI_CREATE_DEFAULT_INSTANCE();
+MIDI_CREATE_INSTANCE(SoftwareSerial, midiSerial, MIDI2);
 
 enum midiNotes {
         NOTE_C1 = 36,
@@ -91,6 +90,7 @@ enum midiNotes {
 int chan_lamp01 = 1;
 int chan_lamp02 = 4;
 
+int ledPin = 13;
 
 // Configure a DMX master controller, the master controller
 // will use the RXEN_PIN to control its write operation 
@@ -100,26 +100,28 @@ DMX_Master        dmx_master ( DMX_MASTER_CHANNELS, RXEN_PIN );
 // the setup routine runs once when you press reset:
 void setup() {             
   //MIDI setup
-  MIDI.begin(MIDI_CHANNEL);
+  MIDI2.begin(MIDI_CHANNEL);
   
   // Enable DMX master interface and start transmitting
   dmx_master.enable (); 
   
-  
+  pinMode(ledPin, OUTPUT);
 
   // As of the MIDI Library v3.1, the lib uses C style function 
   // pointers to create a callback system for handling input events. 
-  MIDI.setHandleNoteOn(HandleNoteOn); 
-  MIDI.setHandleControlChange(HandleCC);
-  MIDI.setHandleNoteOff(HandleNoteOff);
+  MIDI2.setHandleNoteOn(HandleNoteOn); 
+  MIDI2.setHandleControlChange(HandleCC);
+  MIDI2.setHandleNoteOff(HandleNoteOff);
 
-  MIDI.setHandleClock(HandleClock);
+  MIDI2.setHandleClock(HandleClock);
+  allLightsOff();
 }
 
 // the loop routine runs over and over again forever:
 void loop() 
 {
-  MIDI.read();
+  MIDI2.read();
+  
 }
 
 //MIDI Functions
@@ -137,6 +139,8 @@ void HandleNoteOn(byte channel, byte pitch, byte velocity)
       setLightTo(chan_lamp02, velocity);
       break;
   }
+  allLightsOn();
+  digitalWrite(ledPin, HIGH);
 }
 
 void HandleNoteOff(byte channel, byte pitch, byte velocity) 
@@ -152,6 +156,8 @@ void HandleNoteOff(byte channel, byte pitch, byte velocity)
       setLightOff(chan_lamp02);
       break;
   }
+  allLightsOff();
+  digitalWrite(ledPin, LOW);
 }
 
 void HandleCC(byte channel, byte number, byte value) 
