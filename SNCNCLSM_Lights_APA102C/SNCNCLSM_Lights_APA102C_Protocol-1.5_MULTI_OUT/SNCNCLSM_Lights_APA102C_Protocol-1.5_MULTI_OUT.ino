@@ -38,24 +38,40 @@
 #define LED_TYPE APA102
 
 #define NUM_LEDS 565 //Number of LEDs in use
-#define NUM_SABERS 3 //Number of Lightsabers connected
+#define NUM_LEDS_PORT 113 //Number of LEDs on Port 01
+#define NUM_SABERS 5 //Number of Lightsabers connected
 #define NUM_SABER_LEDS 113 //Number of LEDs per Lightsaber
 #define NUM_SABER_SEGMENTS 5 //Number of Segments per Lightsaber
 
-#define MAX_NOISE_LEDS 40 //Maximum number of LEDs that can be randomized for white noise mode
+#define MAX_NOISE_LEDS 100 //Maximum number of LEDs that can be randomized for white noise mode
 
 #define _OFF 0
 
 //
 //FASTLED DATA AND CLOCK PINS
 //
-#define DATA_PIN 5 //Pin to transmit Light Data
-#define CLOCK_PIN 7 //Pin to sync data
+#define PORT01_DATA_PIN 13 //Pin to transmit Light Data
+#define PORT01_CLOCK_PIN 12 //Pin to sync data
+
+#define PORT02_DATA_PIN 11 //Pin to transmit Light Data
+#define PORT02_CLOCK_PIN 10 //Pin to sync data
+
+#define PORT03_DATA_PIN 48 //Pin to transmit Light Data
+#define PORT03_CLOCK_PIN 49 //Pin to sync data
+
+#define PORT04_DATA_PIN 50 //Pin to transmit Light Data
+#define PORT04_CLOCK_PIN 51 //Pin to sync data
+
+#define PORT05_DATA_PIN 52 //Pin to transmit Light Data
+#define PORT05_CLOCK_PIN 53 //Pin to sync data
+
+#define CLOCK_RATE 16 //Clock Rate for APA102 in MHZ
+
 
 #define BRIGHTNESS 255 //Default Brightness
 #define COLOR_TEMPERATURE HighNoonSun //Default Color Temperature
 #define COLOR_CORRECTION TypicalSMD5050 //TypicalSMD5050 //Default Color Correction
-#define DITHER_MODE 2
+#define DITHER_MODE 1
 
 #define COLOR_ORDER BGR // APA102 requires BGR Color order!
 
@@ -77,9 +93,11 @@ byte numSegmentLEDS[] =  {20, 20, 20, 20, 20}; //Number of LEDs per Segment
 
 byte clockTicker = 0; //Used to keep time for Fade calculations.
 
-CHSV globalColor = CHSV(0, 0, 255); //Default White. used for color overrides
+CHSV layer1Color = CHSV(0, 255, 255); //Layer 1 color
+CHSV layer2Color = CHSV(0, 0, 255);; //Layer 2 color: White
 
-CHSV saberColors[NUM_LEDS];
+byte layer1_fade = 0;
+bool layer2_fade[] = {false, false, false, false, false};
 
 byte randomSaber = 0; //variable used to temporarily store active random saber
 byte randomSegment = 0; //variable used to temporarily store active random segment
@@ -88,6 +106,8 @@ byte randomSegment = 0; //variable used to temporarily store active random segme
 //Bit 0: All sabers - Bit 1: Saber 1 - Bit 2: Saber 2 - Bit 3: Saber 3 - Bit 4: Saber 4 - Bit 5: Saber 5
 byte sabersRegisteredForPulsing = 0;
 byte pulseVelocity = 0;
+
+byte SaberSaturation[5];
 
 int l = 0;
 
@@ -165,7 +185,20 @@ enum midiNotes {
   NOTE_GIS4,
   NOTE_A4,
   NOTE_AIS4,
-  NOTE_B4
+  NOTE_B4,
+  //Octave C5
+  NOTE_C5,
+  NOTE_CIS5,
+  NOTE_D5,
+  NOTE_DIS5,
+  NOTE_E5,
+  NOTE_F5,
+  NOTE_FIS5,
+  NOTE_G5,
+  NOTE_GIS5,
+  NOTE_A5,
+  NOTE_AIS5,
+  NOTE_B5
 };
 
 
@@ -175,24 +208,23 @@ enum midiNotes {
 void setup() {
   //Setup Fast PWM Mode
   /*pinMode(3, OUTPUT);
-  pinMode(11, OUTPUT);
-  TCCR2A = _BV(COM2A1) | _BV(COM2B1) | _BV(WGM20);
-  TCCR2B = _BV(CS22);
-  OCR2A = 180;
-  OCR2B = 50;*/
+    pinMode(11, OUTPUT);
+    TCCR2A = _BV(COM2A1) | _BV(COM2B1) | _BV(WGM20);
+    TCCR2B = _BV(CS22);
+    OCR2A = 180;
+    OCR2B = 50;*/
   //Set MIDI Baud rate
   Serial.begin(57600); //57600
 
   //Wait 1 Second to protect LEDs from current onslaught
   delay(1000);
 
-  //FastLED setup
-  FastLED.addLeds<LED_TYPE, DATA_PIN, CLOCK_PIN, COLOR_ORDER, DATA_RATE_MHZ(10)>(leds, NUM_LEDS); //CLOCK SET TO 12 MHZ!!!
-
-  //Set all Saber Colors to default white
-  for (byte i = 0; i < NUM_SABERS; i++) {
-    saberColors[i] = CHSV(0, 0, 255);
-  }
+  //FastLED setup: Setup All 5 Ports
+  FastLED.addLeds<LED_TYPE, PORT01_DATA_PIN, PORT01_CLOCK_PIN, COLOR_ORDER, DATA_RATE_MHZ(CLOCK_RATE)>(leds, 0, NUM_LEDS_PORT);
+  FastLED.addLeds<LED_TYPE, PORT02_DATA_PIN, PORT02_CLOCK_PIN, COLOR_ORDER, DATA_RATE_MHZ(CLOCK_RATE)>(leds, NUM_LEDS_PORT, NUM_LEDS_PORT);
+  FastLED.addLeds<LED_TYPE, PORT03_DATA_PIN, PORT03_CLOCK_PIN, COLOR_ORDER, DATA_RATE_MHZ(CLOCK_RATE)>(leds, NUM_LEDS_PORT * 2, NUM_LEDS_PORT);
+  FastLED.addLeds<LED_TYPE, PORT04_DATA_PIN, PORT04_CLOCK_PIN, COLOR_ORDER, DATA_RATE_MHZ(CLOCK_RATE)>(leds, NUM_LEDS_PORT * 3, NUM_LEDS_PORT);
+  FastLED.addLeds<LED_TYPE, PORT05_DATA_PIN, PORT05_CLOCK_PIN, COLOR_ORDER, DATA_RATE_MHZ(CLOCK_RATE)>(leds, NUM_LEDS_PORT * 4, NUM_LEDS_PORT);
 
   //FastLED color adjustments
   FastLED.setBrightness ( BRIGHTNESS );
@@ -208,6 +240,8 @@ void setup() {
   MIDI.setHandleNoteOn(HandleNoteOn);
   MIDI.setHandleNoteOff(HandleNoteOff);
   MIDI.setHandleClock(HandleClock);
+  //MIDI.setHandleStop(HandleStop);
+  //MIDI.setHandleTimeCodeQuarterFrame(HandleTimeCodeQuarterFrame);
 
   //Set Power unit to use correct voltage and current
   set_max_power_in_volts_and_milliamps(5, 6000); //36000 = 36 Amperes = 7,2 Amperes per Saber
@@ -215,9 +249,9 @@ void setup() {
   //Setup is complete, blink through Lights to show we're ready
   BlinkLedToShowThatWeAreReady();
 
-  globalColor = CHSV(0,0,255);
-  
-  
+  layer1Color = CHSV(0, 255, 0);
+
+
 
 }
 
@@ -227,25 +261,14 @@ void setup() {
 
 void loop() {
   MIDI.read();
-  /*randomSaber = random8(NUM_SABERS);
-  randomSegment = random8(NUM_SABER_SEGMENTS); 
-  FillSaberSegment(randomSaber, randomSegment, 255);
-  FastLED.show(); //Display changes
-  FillSaberSegment(randomSaber, randomSegment, 0);
-  FastLED.show();*/
-  FillAllSabers(sin8(clockTicker));
-  FastLED.show();
+  if(layer1_fade > 0) {
+    layer1_fade -= 5;
+    FillAllSabers(layer1_fade);
+    FastLED.show();
+  }
   
   
-  //FillSaber(1, 255);
-  //FastLED.show();
-  /*
-  if(whiteNoiseON) {
-    WhiteNoise();
-  }*/
 
-  clockTicker+=1;
-  
 }
 
 //
@@ -274,65 +297,51 @@ void HandleNoteOn(byte channel, byte pitch, byte velocity)
     //
 
     case NOTE_D1:
-      globalColor = CHSV(0, 0, velocity); //White
+      layer1Color = CHSV(0, 0, velocity); //White
       break;
     case NOTE_E1:
-      globalColor = CHSV(0, 255, velocity); //Red
+      layer1Color = CHSV(0, 255, velocity); //Red
       break;
     case NOTE_F1:
-      globalColor = CHSV(96, 255, velocity); //Green
+      layer1Color = CHSV(96, 255, velocity); //Green
       break;
     case NOTE_G1:
-      globalColor = CHSV(160, 255, velocity); //Blue
+      layer1Color = CHSV(160, 255, velocity); //Blue
       break;
     case NOTE_A1:
-      globalColor = CHSV(64, 255, velocity); //Yellow
+      layer1Color = CHSV(64, 255, velocity); //Yellow
       break;
     case NOTE_B1:
-      globalColor = CHSV(192, 255, velocity); //Purple
+      layer1Color = CHSV(192, 255, velocity); //Purple
       break;
 
     //
-    //Solid Fills: SABERS
+    //LAYER 1
     //
 
     case NOTE_C2: //C2 Switches all lights on
-      FillAllSabers(velocity);
+      layer 1_fade = 0;
+      layer1Color.value = velocity;
+      FillAllSabers(layer1Color.value);
       break;
     case NOTE_D2: //D2 fills a random Saber
-      randomSaber = random8(NUM_SABERS);
-      FillSaber(randomSaber, velocity);
+      layer1_fade = 0;
+      layer1Color.value = velocity;
+      FillAllSabers(layer1Color.value);
       break;
-    case NOTE_DIS2: //TODO: DIS2 fills random saber with random color
+    case NOTE_E2: //TODO: DIS2 fills random saber with random color
       ////////
       break;
-    //Single Sabers
-    case NOTE_F2: //Saber 1
-      FillSaber(0, velocity);
-      break;
-    case NOTE_FIS2: //Saber 2
-      FillSaber(1, velocity);
-      break;
-    case NOTE_G2: //Saber 3
-      FillSaber(2, velocity);
-      break;
-    case NOTE_GIS2: //Saber 4
-      FillSaber(3, velocity);
-      break;
-    case NOTE_A2: //Saber 5
-      FillSaber(4, velocity);
-      break;
-
+    
+    // 
     //
-    //Solid Fills: SEGMENTS
+    //LAYER 2
     //
 
-    case NOTE_C3: //C3 fills random segment with global color
-      randomSaber = random8(NUM_SABERS);
-      randomSegment = random8(NUM_SABER_SEGMENTS); 
-      FillSaberSegment(randomSaber, randomSegment, velocity);
+    case NOTE_C3: //C3 fills all Sabers with Static white
+       
       break;
-    case NOTE_CIS3: //TODO: CIS3 fills random segment with random color
+    case NOTE_CIS3: //
       break;
     //Segment rows
     case NOTE_F3: //Segment Row 1
@@ -350,30 +359,8 @@ void HandleNoteOn(byte channel, byte pitch, byte velocity)
     case NOTE_A3: //Segment Row 5
       FillSaberSegmentRow(4, velocity);
       break;
-
-    //
-    //PULSING
-    //
-
-    case NOTE_C4: //C4 has all lights pulse
-      bitSet(sabersRegisteredForPulsing, 0);
-      break;
-    //Single sabers
-    case NOTE_F4: //Saber 1
-      bitSet(sabersRegisteredForPulsing, 1);
-      break;
-    case NOTE_FIS4: //Saber 2
-      bitSet(sabersRegisteredForPulsing, 2);
-      break;
-    case NOTE_G4: //Saber 3
-      bitSet(sabersRegisteredForPulsing, 3);
-      break;
-    case NOTE_GIS4: //Saber 4
-      bitSet(sabersRegisteredForPulsing, 4);
-      break;
-    case NOTE_A4: //Saber 5
-      bitSet(sabersRegisteredForPulsing, 5);
-      break;
+    default:
+      return;
   }
 
   //Output changes
@@ -393,19 +380,20 @@ void HandleNoteOff(byte channel, byte pitch, byte velocity)
     case NOTE_C0: //C0 is our Panic Switch
       AllLightsOff();
       break;
-      
+
     //
     //Solid Fills: SABERS
     //
 
     case NOTE_C2: //C2 Note Off Switches all lights OFF
-      AllLightsOff();
+      layer1_fade = 0;
+      FillAllSabers(OFF);
       break;
     case NOTE_D2: //D2 switches random Saber OFF
-      FillSaber(randomSaber, _OFF);
+      layer1_fade = 255;
       break;
-    case NOTE_DIS2: //TODO: DIS2 fills random saber with random color
-      ///////
+    case NOTE_E2: //TODO: DIS2 fills random saber with random color
+      layer1_fade = 255;
       break;
     //Single Sabers
     case NOTE_F2: //Saber 1
@@ -474,6 +462,8 @@ void HandleNoteOff(byte channel, byte pitch, byte velocity)
     case NOTE_A4: //Saber 5
       bitClear(sabersRegisteredForPulsing, 5);
       break;
+    default:
+      return;
   }
 
   //Output Changes
@@ -481,14 +471,8 @@ void HandleNoteOff(byte channel, byte pitch, byte velocity)
 
 }
 
-//Function to handle MIDI CLOCK ticks (required for fading)
 void HandleClock() {
-  
-  clockTicker++; //increment clock ticker.
-  PulseSabers(); //Call function to Fade Sabers
-  
 }
-
 
 //
 //FASTLED functions
@@ -502,39 +486,38 @@ byte remapBrightness(byte velocity) {
 
 //Startup Function to indicate proper functionality
 void BlinkLedToShowThatWeAreReady() {
-  
+
   for ( byte i = 0; i < NUM_SABERS; i++) {
     FillSaber(i, 255); //Fill white
     FastLED.show(); //Display changes
     delay(200);
-    
+
     FillSaber(i, 0); //Fill black
     delay(200);
     FastLED.show(); //Display changes
   }
-  
+
 }
 
 //Function to set single saber to color and brightness
 void FillSaber(byte saber, byte brightness) {
-  
-  //saberColors[saber].value = brightness; //Set brightness of selected saber
-  globalColor.value = brightness;
+  //set brightness to desired value
+  layer1Color.value = brightness;
   //iterate through LEDs of selected saber and set to new value
   for (int i = saber * NUM_SABER_LEDS; i < (saber + 1) * NUM_SABER_LEDS; i++) {
-    leds[i] = globalColor;
+    leds[i] = layer1Color;
   }
   //FastLED.show(); //Display changes
 }
 
 //Function to fill a segment of a given saber
 void FillSaberSegment(byte saber, byte segment, byte brightness) {
-  
-  globalColor.value = brightness;
+
+  layer1Color.value = brightness;
 
   //iterate through LEDs of selected saber-segment and set to new value
   for (int i = saber * NUM_SABER_LEDS + segment * numSegmentLEDS[segment]; i < saber * NUM_SABER_LEDS + (segment + 1) * numSegmentLEDS[segment]; i++) {
-    leds[i] = globalColor;
+    leds[i] = layer1Color;
   }
 }
 
@@ -553,8 +536,8 @@ void AllLightsOff() {
 
 //Function to set all sabers to color and brightness
 void FillAllSabers(byte brightness) {
-  globalColor.value = brightness;
-  fill_solid(leds, NUM_LEDS, CRGB(brightness,brightness,brightness));
+  layer1Color.value = brightness;
+  fill_solid(leds, NUM_LEDS, layer1Color);
 }
 
 //Function to fade all registered sabers
@@ -566,9 +549,6 @@ void PulseSabers() {
   //pulseVelocity = sin(clockTicker) * 127 + 128;
   //FastLED VERSION:
   //FastLED.sin8 can only accept values <256, if clockTicker is larger it needs to be reset.
-  if (clockTicker >= 256) {
-    clockTicker = 0;
-  }
   pulseVelocity = sin8(clockTicker);
 
   //If no sabers are registered, don't bother calculating anything. Saves resources ;)
@@ -594,11 +574,13 @@ void PulseSabers() {
 }
 
 void WhiteNoise() {
-  FillAllSabers(sin8(clockTicker));
-  for(int i = 0; i<MAX_NOISE_LEDS; i++) {
+  fill_solid(leds, NUM_LEDS, CRGB::Blue);
+  FastLED.show();
+  for (int i = 0; i < MAX_NOISE_LEDS; i++) {
     leds[random16(NUM_LEDS)] = CRGB::White;
   }
   FastLED.show();
-  
+
 }
+
 
