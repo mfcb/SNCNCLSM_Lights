@@ -1,5 +1,31 @@
 //Includes
+#include <bitswap.h>
+#include <chipsets.h>
+#include <color.h>
+#include <colorpalettes.h>
+#include <colorutils.h>
+#include <controller.h>
+#include <cpp_compat.h>
+#include <dmx.h>
 #include <FastLED.h>
+#include <fastled_config.h>
+#include <fastled_delay.h>
+#include <fastled_progmem.h>
+#include <fastpin.h>
+#include <fastspi.h>
+#include <fastspi_bitbang.h>
+#include <fastspi_dma.h>
+#include <fastspi_nop.h>
+#include <fastspi_ref.h>
+#include <fastspi_types.h>
+#include <hsv2rgb.h>
+#include <led_sysdefs.h>
+#include <lib8tion.h>
+#include <noise.h>
+#include <pixelset.h>
+#include <pixeltypes.h>
+#include <platforms.h>
+#include <power_mgt.h>
 
 #include <MIDI.h>
 
@@ -30,16 +56,16 @@
 #define PORT02_DATA_PIN 11 //Pin to transmit Light Data
 #define PORT02_CLOCK_PIN 10 //Pin to sync data
 
-#define PORT03_DATA_PIN 9 //Pin to transmit Light Data
-#define PORT03_CLOCK_PIN 8 //Pin to sync data
+#define PORT03_DATA_PIN 48 //Pin to transmit Light Data
+#define PORT03_CLOCK_PIN 49 //Pin to sync data
 
-#define PORT04_DATA_PIN 7 //Pin to transmit Light Data
-#define PORT04_CLOCK_PIN 6 //Pin to sync data
+#define PORT04_DATA_PIN 50 //Pin to transmit Light Data
+#define PORT04_CLOCK_PIN 51 //Pin to sync data
 
-#define PORT05_DATA_PIN 5 //Pin to transmit Light Data
-#define PORT05_CLOCK_PIN 4 //Pin to sync data
+#define PORT05_DATA_PIN 52 //Pin to transmit Light Data
+#define PORT05_CLOCK_PIN 53 //Pin to sync data
 
-#define CLOCK_RATE 16 //Clock Rate for APA102 in MHZ
+#define CLOCK_RATE 12 //Clock Rate for APA102 in MHZ
 
 
 #define BRIGHTNESS 255 //Default Brightness
@@ -84,6 +110,9 @@ byte randomSegments[5]; //variable used to temporarily store active random segme
 byte randomSaber = 0;
 byte randomSegment = 0;
 
+byte saturation = 0;
+byte value = 0;
+boolean fading = false;
 
 
 bool whiteNoiseON = true;
@@ -201,8 +230,6 @@ enum midiNotes {
   NOTE_AIS7,
   NOTE_B7
 };
-
-int l = 0;
 //
 //SETUP function. Used at startup to set global variables.
 //
@@ -219,9 +246,6 @@ void setup() {
   FastLED.addLeds<LED_TYPE, PORT03_DATA_PIN, PORT03_CLOCK_PIN, COLOR_ORDER, DATA_RATE_MHZ(CLOCK_RATE)>(leds, NUM_LEDS_PORT * 2, NUM_LEDS_PORT);
   FastLED.addLeds<LED_TYPE, PORT04_DATA_PIN, PORT04_CLOCK_PIN, COLOR_ORDER, DATA_RATE_MHZ(CLOCK_RATE)>(leds, NUM_LEDS_PORT * 3, NUM_LEDS_PORT);
   FastLED.addLeds<LED_TYPE, PORT05_DATA_PIN, PORT05_CLOCK_PIN, COLOR_ORDER, DATA_RATE_MHZ(CLOCK_RATE)>(leds, NUM_LEDS_PORT * 4, NUM_LEDS_PORT);
-
-  FillAllSabers(layer1, 0, 0, false);
-  FillAllSabers(layer2, 255, 0, false);
   
 
   //FastLED color adjustments
@@ -245,9 +269,6 @@ void setup() {
 
   globalColor = CHSV(0, 255, 0);
 
-  ApplyLayers();
-  FastLED.show();
-
 
 
 }
@@ -258,20 +279,20 @@ void setup() {
 
 void loop() {
   MIDI.read();
-  /*if(layer1_fade > 0) {
-    layer1_fade -= 5;
-    FillAllSabers(layer1_fade);
+
+  if(fading == true) {
+    int val = value;
+    val -= 5;
+    if(val > 0) {
+      value = val;
+    } else {
+      value = 0;
+    }
+
+    fill_solid(leds, NUM_LEDS, CHSV(globalColor.hue, globalColor.saturation, value));
     FastLED.show();
-  }*/
-  /*if(l == 0) {
-    FillAllSabers(layer1, 255, 255, false);
-    l=1;
-  } else {
-    FillAllSabers(layer1, 255, 0, false);
-    l=0;
-  }*/
-  ApplyLayers();
-  FastLED.show();
+  }
+
   
   
   
@@ -286,7 +307,7 @@ void ApplyLayers() {
     //flash layer
     if(layer2[i].fading == true) {
       sat +=5;
-      if(sat < 255) {
+      if(sat < layer1[i].saturation) {
         layer2[i].saturation = sat;
       } else {
         layer2[i].saturation = 255;
@@ -314,7 +335,7 @@ void ApplyLayers() {
       }
     }
 
-    leds[i].setHSV(globalColor.hue, min(layer1[i].saturation,layer2[i].saturation), max(layer1[i].value,layer2[i].value));
+    leds[i].setHSV(globalColor.hue, layer1[i].saturation, layer1[i].value);
   }
   
 }
@@ -366,43 +387,44 @@ void HandleNoteOn(byte channel, byte pitch, byte velocity)
     //
 
     case NOTE_C2: //C2 Set baseLayer of all lights
-      FillAllSabers(layer1, 255, velocity, false);
+      FillAllSabers(velocity);
       break;
     case NOTE_CIS2: //D2 Same as C2, but fades in NoteOff
-      FillAllSabers(layer1, 255, velocity, false);
+      FillAllSabers(255);
+      value = 255;
       break;
     //STATIC ON, STATIC OFF
     //Note ON
     case NOTE_D2: //Saber 01 Static ON
-      FillSaber(layer1, 0, globalColor.saturation, velocity, false);
+      FillSaber(0, velocity);
       break;
     case NOTE_DIS2: //Saber 02 Static ON
-      FillSaber(layer1, 1, globalColor.saturation, velocity, false);
+      FillSaber(1, velocity);
       break;
     case NOTE_E2: //Saber 03 Static ON
-      FillSaber(layer1, 2, globalColor.saturation, velocity, false);
+      FillSaber(2, velocity);
       break;
     case NOTE_F2: //Saber 04 Static ON
-      FillSaber(layer1, 3, globalColor.saturation, velocity, false);
+      FillSaber(3, velocity);
       break;
     case NOTE_FIS2: //Saber 05 Static ON
-      FillSaber(layer1, 4, globalColor.saturation, velocity, false);
+      FillSaber(4, velocity);
       break;
     //STATIC ON, FADE OUT
     case NOTE_G2: //Saber 01 Note ON
-      FillSaber(layer1, 0, globalColor.saturation, velocity, false);
+      FillSaber(0, velocity);
       break;
     case NOTE_GIS2: //Saber 02 Note ON
-      FillSaber(layer1, 1, globalColor.saturation, velocity, false);
+      FillSaber(1, velocity);
       break;
     case NOTE_A2: //Saber 03 Note ON
-      FillSaber(layer1, 2, globalColor.saturation, velocity, false);
+      FillSaber(2, velocity);
       break;
     case NOTE_AIS2: //Saber 04 Note ON
-      FillSaber(layer1, 3, globalColor.saturation, velocity, false);
+      FillSaber(3, velocity);
       break;
     case NOTE_B2: //Saber 05 Note ON
-      FillSaber(layer1, 4, globalColor.saturation, velocity, false);
+      FillSaber(4, velocity);
       break;  
 
     //
@@ -410,54 +432,66 @@ void HandleNoteOn(byte channel, byte pitch, byte velocity)
     //
 
     case NOTE_C3: //C3 sets all lights to white
-      FillAllSabers(layer2, 0, velocity, false);
+      globalColor = CHSV(0,0,velocity);
+      FillAllSabers(velocity);
       break;
     case NOTE_CIS3: //CIS3 same as C3 but with fade in NoteOFF
-      FillAllSabers(layer2, 0, velocity, false);
+      globalColor = CHSV(0,0,velocity);
+      FillAllSabers(velocity);
       break;
     case NOTE_D3: //C3 Random Saber ON
       randomSaber = random8(NUM_SABERS);
-      FillSaber(layer2, randomSaber, 0, velocity, false);
+      FillSaber(randomSaber, velocity);
       break;
     case NOTE_DIS3: //C3 sets all lights
-      FillAllSabers(layer2, 0, velocity, false);
+      FillAllSabers(velocity);
       break;
     case NOTE_E3: //E3 Random saber strobe
-      FillSaber(layer2, randomSabers[0], 0, velocity, false);
+      //FillSaber(layer2, randomSabers[0], 0, velocity, false);
       break;
       
     //SINGLE SABERS STATIC
     case NOTE_F3: //C3 sets all lights
-      FillSaber(layer2, 0, 0, velocity, false);
+      globalColor = CHSV(0,0,velocity);
+      FillSaber(0, velocity);
       break;
     case NOTE_FIS3: //C3 sets all lights
-      FillSaber(layer2, 1, 0, velocity, false);
+      globalColor = CHSV(0,0,velocity);
+      FillSaber(1, velocity);
       break;
     case NOTE_G3: //C3 sets all lights
-      FillSaber(layer2, 2, 0, velocity, false);
+      globalColor = CHSV(0,0,velocity);
+      FillSaber(2, velocity);
       break;
     case NOTE_GIS3: //C3 sets all lights
-      FillSaber(layer2, 3, 0, velocity, false);
+      globalColor = CHSV(0,0,velocity);
+      FillSaber(3, velocity);
       break;
     case NOTE_A3: //C3 sets all lights
-      FillSaber(layer2, 4, 0, velocity, false);
+      globalColor = CHSV(0,0,velocity);
+      FillSaber(4, velocity);
       break;
       
     //SINGLE SABERS FADE NOTEOFF
     case NOTE_AIS3: //C3 sets all lights
-      FillSaber(layer2, 0, 0, velocity, false);
+      globalColor = CHSV(0,0,velocity);
+      FillSaber(0, velocity);
       break;
     case NOTE_B3: //C3 sets all lights
-      FillSaber(layer2, 1, 0, velocity, false);
+      globalColor = CHSV(0,0,velocity);
+      FillSaber(1, velocity);
       break;
     case NOTE_C4: //C3 sets all lights
-      FillSaber(layer2, 2, 0, velocity, false);
+      globalColor = CHSV(0,0,velocity);
+      FillSaber(2, velocity);
       break;
     case NOTE_CIS4: //C3 sets all lights
-      FillSaber(layer2, 3, 0, velocity, false);
+      globalColor = CHSV(0,0,velocity);
+      FillSaber(3, velocity);
       break;
     case NOTE_D4: //C3 sets all lights
-      FillSaber(layer2, 4, 0, velocity, false);
+      globalColor = CHSV(0,0,velocity);
+      FillSaber(4, velocity);
       break;
 
     //SEGMENTS
@@ -465,29 +499,29 @@ void HandleNoteOn(byte channel, byte pitch, byte velocity)
     case NOTE_C5: //Random Segment
       randomSaber = random8(NUM_SABERS);
       randomSegment = random8(NUM_SABER_SEGMENTS);
-      FillSaberSegment(layer2, randomSaber, randomSegment, 0, velocity, false);
+      FillSaberSegment(randomSaber, randomSegment, velocity);
       break;
     case NOTE_CIS5: //Random Segments
-      RandomizeSegments(layer2, 5, 0, velocity);
+      //RandomizeSegments(layer2, 5, 0, velocity);
       break;  
     case NOTE_D5: //Segment Rush UP
       break;
     case NOTE_DIS5: //Segment Rush DOWN
       break;
     case NOTE_F5: //Segment Row 1
-      FillSaberSegmentRow(layer2, 0, 0, velocity, false);
+      FillSaberSegmentRow(0, velocity);
       break;
     case NOTE_FIS5: //Segment Row 2
-      FillSaberSegmentRow(layer2, 1, 0, velocity, false);
+      FillSaberSegmentRow(1, velocity);
       break;
     case NOTE_G5: //Segment Row 3
-      FillSaberSegmentRow(layer2, 2, 0, velocity, false);
+      FillSaberSegmentRow(2, velocity);
       break;
     case NOTE_GIS5: //Segment Row 4
-      FillSaberSegmentRow(layer2, 3, 0, velocity, false);
+      FillSaberSegmentRow(3, velocity);
       break;
     case NOTE_A5: //Segment Row 5
-      FillSaberSegmentRow(layer2, 4, 0, velocity, false);
+      FillSaberSegmentRow(4, velocity);
       break;        
       
     //IF NOTE DOES NOT MATCH ANY DEFINED NOTES, CANCEL
@@ -496,8 +530,7 @@ void HandleNoteOn(byte channel, byte pitch, byte velocity)
   }
 
   //Output changes
-  //ApplyLayers();
-  //FastLED.show();
+  FastLED.show();
 }
 
 //
@@ -523,43 +556,49 @@ void HandleNoteOff(byte channel, byte pitch, byte velocity)
     //STATIC ON, STATIC OFF
     //Note OFF
     case NOTE_C2: //C2 Set baseLayer of all lights
-      FillAllSabers(layer1, globalColor.saturation, 0, false);
+      FillAllSabers(_OFF);
       break;
     case NOTE_CIS2: //D2 Same as C2, but fades in NoteOff
-      FillAllSabers(layer1, 255, layer1[0].value, true);
+      fading = true;
+      FillAllSabers(velocity);
       break;
     //STATIC ON, STATIC OFF
     case NOTE_D2: //Saber 01 Note OFF: Static
-      FillSaber(layer1, 0, globalColor.saturation, _OFF, false);
+      FillSaber(0, _OFF);
       break;
     case NOTE_DIS2: //Saber 02 Note OFF: Static
-      FillSaber(layer1, 1, globalColor.saturation, _OFF, false);
+      FillSaber(1, _OFF);
       break;
     case NOTE_E2: //Saber 03 Note OFF: Static
-      FillSaber(layer1, 2, globalColor.saturation, _OFF, false);
+      FillSaber(2, _OFF);
       break;
     case NOTE_F2: //Saber 04 Note OFF: Static
-      FillSaber(layer1, 3, globalColor.saturation, _OFF, false);
+      FillSaber(3, _OFF);
       break;
     case NOTE_FIS2: //Saber 05 Note OFF: Static
-      FillSaber(layer1, 4, globalColor.saturation, _OFF, false);
+      FillSaber(4, _OFF);
       break;
     //STATIC ON, FADE OUT
     //Note OFF
     case NOTE_G2: //Saber 01 Note OFF: Fade
-      FillSaber(layer1, 0, globalColor.saturation, layer1[0].value, true);
+      fading = true;
+      FillSaber(0, velocity);
       break;
     case NOTE_GIS2: //Saber 02 Note OFF: Fade
-      FillSaber(layer1, 1, globalColor.saturation, layer1[113].value, true);
+      fading = true;
+      FillSaber(1, velocity);
       break;
     case NOTE_A2: //Saber 03 Note OFF: Fade
-      FillSaber(layer1, 2, globalColor.saturation, layer1[226].value, true);
+      fading = true;
+      FillSaber(2, velocity);
       break;
     case NOTE_AIS2: //Saber 04 Note OFF: Fade
-      FillSaber(layer1, 3, globalColor.saturation, layer1[339].value, true);
+      fading = true;
+      FillSaber(3, velocity);
       break;
     case NOTE_B2: //Saber 05 Note OFF: Fade
-      FillSaber(layer1, 4, globalColor.saturation, layer1[452].value, true);
+      fading = true;
+      FillSaber(4, velocity);
       break;
 
     //
@@ -567,79 +606,85 @@ void HandleNoteOff(byte channel, byte pitch, byte velocity)
     //
 
     case NOTE_C3: //All lights off
-      FillAllSabers(layer2, 0, 0, false);
+      FillAllSabers(_OFF);
       break;
     case NOTE_CIS3: //All lights fade
-      FillAllSabers(layer2, 0, layer2[0].value, true);
+      fading = true;
+      FillAllSabers(velocity);
       break;
     case NOTE_D3: //Random Saber OFF
-      FillSaber(layer2, randomSaber, 0, 0, false);
+      FillSaber(randomSaber, _OFF);
       break;
     case NOTE_DIS3: //All Lights off
-      FillAllSabers(layer2, 0, 0, false);
+      FillAllSabers(_OFF);
       break;
     case NOTE_E3: //Random Saber OFF
-      FillSaber(layer2, randomSabers[0], 0, 0, false);
+      FillSaber(randomSaber, _OFF);
       break;
     //SINGLE SABERS STATIC
     case NOTE_F3: //Saber 1 OFF
-      FillSaber(layer2, 0, 0, _OFF, false);
+      FillSaber(0,_OFF);
       break;
     case NOTE_FIS3: //Saber 2 OFF
-      FillSaber(layer2, 1, 0, _OFF, false);
+      FillSaber(1,_OFF);
       break;
     case NOTE_G3: //Saber 3 OFF
-      FillSaber(layer2, 2, 0, _OFF, false);
+      FillSaber(2,_OFF);
       break;
     case NOTE_GIS3: //Saber 4 OFF
-      FillSaber(layer2, 3, 0, _OFF, false);
+      FillSaber(3,_OFF);
       break;
     case NOTE_A3: //Saber 5 OFF
-      FillSaber(layer2, 4, 0, _OFF, false);
+      FillSaber(4,_OFF);
       break;
     //SINGLE SABERS FADE IN NOTEOFF
     case NOTE_AIS3: //Saber 1 Fade
-      FillSaber(layer2, 0, 0, layer2[0].value, true);
+      fading = true;
+      FillSaber(0,velocity);
       break;
     case NOTE_B3: //Saber 2 Fade
-      FillSaber(layer2, 1, 0, layer2[113].value, true);
+      fading = true;
+      FillSaber(1,velocity);
       break;
     case NOTE_C4: //Saber 3 Fade
-      FillSaber(layer2, 2, 0, layer2[226].value, true);
+      fading = true;
+      FillSaber(2,velocity);
       break;
     case NOTE_CIS4: //Saber 4 Fade
-      FillSaber(layer2, 3, 0, layer2[339].value, true);
+      fading = true;
+      FillSaber(3,velocity);
       break;
     case NOTE_D4: //Saber 5 Fade
-      FillSaber(layer2, 4, 0, layer2[452].value, true);
+      fading = true;
+      FillSaber(4,velocity);
       break;
 
     //SEGMENTS
 
     case NOTE_C5: //Random Segment
-      FillSaberSegment(layer2, randomSaber, randomSegment, 0, _OFF, false);
+      FillSaberSegment(randomSaber, randomSegment, _OFF);
       break;
     case NOTE_CIS5: //Random Segments
-      FillRandomSegments(layer2, 0, _OFF);
+      FillAllSabers(_OFF);
       break;  
     case NOTE_D5: //Segment Rush UP
       break;
     case NOTE_DIS5: //Segment Rush DOWN
       break;
     case NOTE_F5: //Segment Row 1
-      FillSaberSegmentRow(layer2, 0, 0, _OFF, false);
+      FillSaberSegmentRow(0, _OFF);
       break;
     case NOTE_FIS5: //Segment Row 2
-      FillSaberSegmentRow(layer2, 1, 0, _OFF, false);
+      FillSaberSegmentRow(1, _OFF);
       break;
     case NOTE_G5: //Segment Row 3
-      FillSaberSegmentRow(layer2, 2, 0, _OFF, false);
+      FillSaberSegmentRow(2, _OFF);
       break;
     case NOTE_GIS5: //Segment Row 4
-      FillSaberSegmentRow(layer2, 3, 0, _OFF, false);
+      FillSaberSegmentRow(3, _OFF);
       break;
     case NOTE_A5: //Segment Row 5
-      FillSaberSegmentRow(layer2, 4, 0, _OFF, false);
+      FillSaberSegmentRow(4, _OFF);
       break;
 
     
@@ -649,8 +694,7 @@ void HandleNoteOff(byte channel, byte pitch, byte velocity)
   }
 
   //Output Changes
-  //ApplyLayers();
-  //FastLED.show();
+  FastLED.show();
 
 }
 
@@ -668,13 +712,11 @@ byte remapBrightness(byte velocity) {
 void BlinkLedToShowThatWeAreReady() {
 
   for ( byte i = 0; i < NUM_SABERS; i++) {
-    FillSaber(layer1, i, 0, 255, false); //Fill white
-    ApplyLayers();
+    FillSaber(i,255); //Fill white
     FastLED.show(); //Display changes
     delay(200);
 
-    FillSaber(layer1, i, 0, _OFF, false); //Fill black
-    ApplyLayers();
+    FillSaber(i,0); //Fill black
     delay(200);
     FastLED.show(); //Display changes
   }
@@ -682,32 +724,28 @@ void BlinkLedToShowThatWeAreReady() {
 }
 
 //Function to set single saber to color and brightness
-void FillSaber(struct LEDSetting *targetLayer, byte saber, byte saturation, byte value, bool fading) {
+void FillSaber(byte saber, byte value) {
   //iterate through LEDs of selected saber and set to new value
   for (int i = saber * NUM_SABER_LEDS; i < (saber + 1) * NUM_SABER_LEDS; i++) {
-    targetLayer[i].saturation = saturation;
-    targetLayer[i].value = value;
-    targetLayer[i].fading = fading;
+    leds[i] = CHSV(globalColor.hue, globalColor.saturation, value);
   }
   //FastLED.show(); //Display changes
 }
 
 //Function to fill a segment of a given saber
-void FillSaberSegment(struct LEDSetting *targetLayer, byte saber, byte segment, byte saturation, byte value, byte fading) {
+void FillSaberSegment(byte saber, byte segment, byte value) {
 
   //iterate through LEDs of selected saber-segment and set to new value
   for (int i = saber * NUM_SABER_LEDS + segment * numSegmentLEDS[segment]; i < saber * NUM_SABER_LEDS + (segment + 1) * numSegmentLEDS[segment]; i++) {
-    targetLayer[i].saturation = saturation;
-    targetLayer[i].value = value;
-    targetLayer[i].fading = fading;
+    leds[i] = CHSV(globalColor.hue, globalColor.saturation, value);
   }
 }
 
 //Function to fill a row of segments
-void FillSaberSegmentRow(struct LEDSetting *targetLayer, byte row, byte saturation, byte value, byte fading) {
+void FillSaberSegmentRow(byte row, byte value) {
   //iterate through Sabers and fill each segment accordingly to form a row
   for (byte i = 0; i < NUM_SABERS; i++) {
-    FillSaberSegment(targetLayer, i, row, saturation, value, fading);
+    FillSaberSegment(i, row, value);
   }
 }
 
@@ -717,43 +755,12 @@ void AllLightsOff() {
 }
 
 //Function to set all sabers to color and brightness
-void FillAllSabers(struct LEDSetting *targetArray, byte saturation, byte value, boolean fading) {
-  for(int i=0; i<NUM_LEDS; i++) {
-    targetArray[i].saturation = saturation;
-    targetArray[i].value = value;
-    targetArray[i].fading = fading;
-  }
+void FillAllSabers(byte value) {
+  fill_solid(leds, NUM_LEDS, CHSV(globalColor.hue, globalColor.saturation, value));
   
 }
 
-void RandomizeSabers(struct LEDSetting *targetLayer, byte count, byte saturation, byte value) {
-  for(byte i=0;i<count;i++) {
-    randomSabers[i] = random8(NUM_SABERS);
-    FillSaber(targetLayer, randomSabers[i], saturation, value, false);
-    
-  }
-}
 
-void FillRandomSabers(struct LEDSetting *targetLayer, byte saturation, byte value) {
-  for(byte i=0;i<5;i++) {
-    FillSaber(targetLayer, randomSabers[i], saturation, value, false);
-  }
-}
-
-void RandomizeSegments(struct LEDSetting *targetLayer, byte count, byte saturation, byte value) {
-  
-  for(byte i=0;i<count;i++) {
-    randomSabers[i] = random8(NUM_SABERS);
-    randomSegments[i] = random8(NUM_SABER_SEGMENTS);
-    FillSaberSegment(targetLayer, randomSabers[i], randomSegments[i], saturation, value, false);
-  }
-}
-
-void FillRandomSegments(struct LEDSetting *targetLayer, byte saturation, byte value) {
-  for(byte i=0;i<5;i++) {
-    FillSaberSegment(targetLayer, randomSabers[i], randomSegments[i], saturation, value, false);
-  }
-}
 
 void WhiteNoise() {
   fill_solid(leds, NUM_LEDS, CRGB::Blue);

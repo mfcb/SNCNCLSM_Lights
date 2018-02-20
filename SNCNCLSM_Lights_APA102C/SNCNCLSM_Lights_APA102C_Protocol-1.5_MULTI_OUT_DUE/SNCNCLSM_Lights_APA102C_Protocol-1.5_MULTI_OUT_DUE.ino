@@ -1,7 +1,6 @@
 //Includes
 #include <FastLED.h>
-
-#include <MIDI.h>
+#include <MIDIUSB.h>
 
 //////////////////////////////////
 
@@ -39,13 +38,13 @@
 #define PORT05_DATA_PIN 5 //Pin to transmit Light Data
 #define PORT05_CLOCK_PIN 4 //Pin to sync data
 
-#define CLOCK_RATE 16 //Clock Rate for APA102 in MHZ
+#define CLOCK_RATE 250 //Clock Rate for APA102 in KHZ
 
 
 #define BRIGHTNESS 255 //Default Brightness
 #define COLOR_TEMPERATURE HighNoonSun //Default Color Temperature
 #define COLOR_CORRECTION TypicalSMD5050 //TypicalSMD5050 //Default Color Correction
-#define DITHER_MODE 1
+#define DITHER_MODE 2
 
 #define COLOR_ORDER BGR // APA102 requires BGR Color order!
 
@@ -90,9 +89,6 @@ bool whiteNoiseON = true;
 //
 //MIDI GLOBAL VARIABLES
 //
-
-//Create Serial MIDI instance to accept incoming MIDI signals
-MIDI_CREATE_DEFAULT_INSTANCE();
 
 //Enumeration to store all used Midi notes
 enum midiNotes {
@@ -211,14 +207,14 @@ void setup() {
   Serial.begin(57600); //57600
 
   //Wait 1 Second to protect LEDs from current onslaught
-  delay(1000);
+  delay(500);
 
   //FastLED setup: Setup All 5 Ports
-  FastLED.addLeds<LED_TYPE, PORT01_DATA_PIN, PORT01_CLOCK_PIN, COLOR_ORDER, DATA_RATE_MHZ(CLOCK_RATE)>(leds, 0, NUM_LEDS_PORT);
-  FastLED.addLeds<LED_TYPE, PORT02_DATA_PIN, PORT02_CLOCK_PIN, COLOR_ORDER, DATA_RATE_MHZ(CLOCK_RATE)>(leds, NUM_LEDS_PORT, NUM_LEDS_PORT);
-  FastLED.addLeds<LED_TYPE, PORT03_DATA_PIN, PORT03_CLOCK_PIN, COLOR_ORDER, DATA_RATE_MHZ(CLOCK_RATE)>(leds, NUM_LEDS_PORT * 2, NUM_LEDS_PORT);
-  FastLED.addLeds<LED_TYPE, PORT04_DATA_PIN, PORT04_CLOCK_PIN, COLOR_ORDER, DATA_RATE_MHZ(CLOCK_RATE)>(leds, NUM_LEDS_PORT * 3, NUM_LEDS_PORT);
-  FastLED.addLeds<LED_TYPE, PORT05_DATA_PIN, PORT05_CLOCK_PIN, COLOR_ORDER, DATA_RATE_MHZ(CLOCK_RATE)>(leds, NUM_LEDS_PORT * 4, NUM_LEDS_PORT);
+  FastLED.addLeds<LED_TYPE, PORT01_DATA_PIN, PORT01_CLOCK_PIN, COLOR_ORDER, DATA_RATE_KHZ(CLOCK_RATE)>(leds, 0, NUM_LEDS_PORT);
+  FastLED.addLeds<LED_TYPE, PORT02_DATA_PIN, PORT02_CLOCK_PIN, COLOR_ORDER, DATA_RATE_KHZ(CLOCK_RATE)>(leds, NUM_LEDS_PORT, NUM_LEDS_PORT);
+  FastLED.addLeds<LED_TYPE, PORT03_DATA_PIN, PORT03_CLOCK_PIN, COLOR_ORDER, DATA_RATE_KHZ(CLOCK_RATE)>(leds, NUM_LEDS_PORT * 2, NUM_LEDS_PORT);
+  FastLED.addLeds<LED_TYPE, PORT04_DATA_PIN, PORT04_CLOCK_PIN, COLOR_ORDER, DATA_RATE_KHZ(CLOCK_RATE)>(leds, NUM_LEDS_PORT * 3, NUM_LEDS_PORT);
+  FastLED.addLeds<LED_TYPE, PORT05_DATA_PIN, PORT05_CLOCK_PIN, COLOR_ORDER, DATA_RATE_KHZ(CLOCK_RATE)>(leds, NUM_LEDS_PORT * 4, NUM_LEDS_PORT);
 
   FillAllSabers(layer1, 0, 0, false);
   FillAllSabers(layer2, 255, 0, false);
@@ -230,13 +226,6 @@ void setup() {
   FastLED.setCorrection ( COLOR_CORRECTION );
   FastLED.setDither     ( DITHER_MODE );
 
-  //Start receiving MIDI input
-  MIDI.begin(MIDI_CHANNEL);
-
-  // As of the MIDI Library v3.1, the lib uses C style function
-  // pointers to create a callback system for handling input events.
-  MIDI.setHandleNoteOn(HandleNoteOn);
-  MIDI.setHandleNoteOff(HandleNoteOff);
   //Set Power unit to use correct voltage and current
   set_max_power_in_volts_and_milliamps(5, 6000); //36000 = 36 Amperes = 7,2 Amperes per Saber
 
@@ -244,7 +233,7 @@ void setup() {
   BlinkLedToShowThatWeAreReady();
 
   globalColor = CHSV(0, 255, 0);
-
+  pinMode(13, OUTPUT);
   ApplyLayers();
   FastLED.show();
 
@@ -257,7 +246,36 @@ void setup() {
 //
 
 void loop() {
-  MIDI.read();
+  midiEventPacket_t rx = MidiUSB.read();
+  switch(rx.header) {
+    case 0:
+      break;
+    case 0x9:
+      HandleNoteOn(
+        rx.byte1 & 0xF, //channel
+        rx.byte2,       //pitch
+        rx.byte3        //value
+      );
+      break;
+    case 0x8:
+      HandleNoteOff(
+        rx.byte1 & 0xF, //channel
+        rx.byte2,       //pitch
+        rx.byte3        //value 
+      );
+      break;       
+    default:
+      Serial2.print("Unhandled MIDI message: ");
+      Serial2.print(rx.header, HEX);
+      Serial2.print("-");
+      Serial2.print(rx.byte1, HEX);
+      Serial2.print("-");
+      Serial2.print(rx.byte2, HEX);
+      Serial2.print("-");
+      Serial2.println(rx.byte3, HEX);
+  }
+
+  
   /*if(layer1_fade > 0) {
     layer1_fade -= 5;
     FillAllSabers(layer1_fade);
@@ -277,6 +295,7 @@ void loop() {
   
 
 }
+
 
 void ApplyLayers() {
   //if the led at this index is set to fading, subtract from its value
@@ -671,10 +690,12 @@ void BlinkLedToShowThatWeAreReady() {
     FillSaber(layer1, i, 0, 255, false); //Fill white
     ApplyLayers();
     FastLED.show(); //Display changes
+    digitalWrite(13,HIGH);
     delay(200);
 
     FillSaber(layer1, i, 0, _OFF, false); //Fill black
     ApplyLayers();
+    digitalWrite(13,HIGH);
     delay(200);
     FastLED.show(); //Display changes
   }

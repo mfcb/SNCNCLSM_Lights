@@ -267,6 +267,8 @@ void loop() {
 
 void HandleNoteOn(byte channel, byte pitch, byte velocity)
 {
+  fill_solid(leds, NUM_LEDS, CRGB::RED);
+  return;
   //Remap velocity to match light requirements
   velocity = remapBrightness(velocity);
 
@@ -395,6 +397,8 @@ void HandleNoteOn(byte channel, byte pitch, byte velocity)
 
 void HandleNoteOff(byte channel, byte pitch, byte velocity)
 {
+  fill_solid(leds, NUM_LEDS, CRGB::Black);
+  return;
   switch (pitch) {
     //
     //PANIC
