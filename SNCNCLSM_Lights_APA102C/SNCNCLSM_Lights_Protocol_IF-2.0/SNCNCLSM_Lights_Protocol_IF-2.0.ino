@@ -32,6 +32,7 @@
 #define DEFAULT_BRIGHTNESS 245 //Default Brightness
 #define COLOR_TEMPERATURE DirectSunlight //Default Color Temperature
 #define COLOR_CORRECTION UncorrectedColor //TypicalSMD5050 //Default Color Correction
+#define DEFAULT_FADE_SPEED 192 //Default speed for fades
 #define DITHER_MODE 1
 
 #define COLOR_ORDER BGR // APA102 requires BGR Color order!
@@ -68,7 +69,7 @@ struct CRGB leds[NUM_LEDS]; //THE LED ARRAY
 struct CRGB leds_STM[NUM_LEDS]; //THE LED ARRAY
 
 //fading
-byte globalFadeSpeed = 192;
+byte globalFadeSpeed = DEFAULT_FADE_SPEED;
 
 
 //
@@ -84,6 +85,7 @@ MIDI_CREATE_DEFAULT_INSTANCE();
 
 //Panic
 bool trigger_allBlack = false;
+bool trigger_reset = false;
 
 //Random Pixels
 CRGB trigger_randomPixels = 0;
@@ -147,13 +149,6 @@ CRGB trigger_duckValue = 0;
 //RISER
  byte riserLevel = 0;
  CRGB trigger_riser = 0;
-
- //RAIN
- CRGB trigger_rain = 0;
- byte rainSpeed[NUM_SABERS] = {};
- byte dropStartTime[NUM_SABERS] = {};
- bool dripping[NUM_SABERS] = {};
- int rainCounter = 0;
 
 /*
  * 
@@ -229,6 +224,28 @@ void loop() {
 //
 
 void output() {
+  if(trigger_reset) {
+    for(int i = 0; i<NUM_LEDS;i++) {
+      leds[i] = CRGB(0,0,0);
+      leds_STM[i] = CRGB(0,0,0);
+    }
+    trigger_ambience = 0;
+    trigger_gradient = 0;
+    trigger_flash = 0;
+    trigger_flashColor = 0;
+    trigger_randomSegment = 0;
+    trigger_sineLine = false;
+    trigger_pingPongLine = false;
+   for(int i = 0; i<NUM_SABERS;i++) {
+      trigger_sabersToFill[i] = 0;
+      //fade switches
+      trigger_sabersToFadeIn[i] = 0;
+   }
+    
+    //don't repeat
+    trigger_reset = false;
+    return;
+  }
   if(trigger_allBlack) {
     for(int i = 0; i<NUM_LEDS;i++) {
       leds[i] = CRGB(0,0,0);
@@ -326,19 +343,6 @@ void output() {
     drawPoints();
   }
 
-  if(trigger_rain.getLuma() > 0) {
-    for(byte i=0;i<sizeof(dripping);i++) {
-      if(!dripping[i] && rainCounter%dropStartTime[i] == 0) {
-        dripping[i] = true;
-      }
-      if(dripping[i] == true) {
-        drawRain(i%NUM_SABERS,rainSpeed[i], rainCounter-dropStartTime[i], trigger_rain);
-      }
-      
-    }
-    rainCounter++;
-  }
-
   //Iterate through sabers and fill them accordingly
   updateSaberState();
   
@@ -377,6 +381,27 @@ void output() {
   //Output changes
   FastLED.show();
   
+}
+
+void panic() {
+  for(int i = 0; i<NUM_LEDS;i++) {
+      leds[i] = CRGB(0,0,0);
+      leds_STM[i] = CRGB(0,0,0);
+    }
+    trigger_ambience = 0;
+    trigger_gradient = 0;
+    trigger_flash = 0;
+    trigger_flashColor = 0;
+    trigger_randomSegment = 0;
+    trigger_sineLine = false;
+    trigger_pingPongLine = false;
+   for(int i = 0; i<NUM_SABERS;i++) {
+      trigger_sabersToFill[i] = 0;
+      //fade switches
+      trigger_sabersToFadeIn[i] = 0;
+   }
+    
+    FastLED.show();
 }
 
 void clearAll() {
@@ -649,7 +674,7 @@ void scaleGradient(byte scaleMin, byte scaleMax) {
 void addSTM() {
   for(int i = 0; i<NUM_LEDS;i++) {
     leds[i] += leds_STM[i];
-    leds_STM[i].nscale8(globalFadeSpeed);
+//    leds_STM[i].nscale8(globalFadeSpeed);
   }
 }
 
@@ -692,6 +717,10 @@ CRGB getWhite(byte velocity) {
 
 void HandleNoteOn(byte channel, byte pitch, byte velocity) {
   velocity = map(velocity,1,127,2,255);
+  //RESET
+  if(pitch == NOTE_C_MINUS1) {
+    trigger_reset = true;
+  }
   //PANIC
   if(pitch == NOTE_C0) {
     trigger_allBlack = true;
@@ -989,22 +1018,13 @@ void HandleNoteOn(byte channel, byte pitch, byte velocity) {
     trigger_sinePoint = getOrange(velocity);
   }
 
-  if(pitch == NOTE_A6) {
-    trigger_rain = getWhite(velocity);
-    rainCounter = 1;
-    for(byte i=0;i<sizeof(rainSpeed);i++) {
-      rainSpeed[i] = random8(6,9);
-      dripping[i] = false;
-      dropStartTime[i] = i+1;
-    }
-  }
-
-  if(pitch == NOTE_B6) {
+  if(pitch == NOTE_B6) { //"VOLUME"-STYLE RISER
     riserLevel = 1;
     trigger_riser = getWhite(velocity); // WHITE
   }
 
-  if(pitch == NOTE_C7) {
+  //White flashes single saber
+  if(pitch == NOTE_C7) { 
     trigger_sabersToFill[0] = getWhite(velocity); //FILL SABER 0 WHITE
     trigger_saberStatus[0] = ON;
   }
@@ -1197,10 +1217,6 @@ void HandleNoteOff(byte channel, byte pitch, byte velocity) {
 
     if(pitch == NOTE_GIS6) {
       trigger_sinePoint = 0;
-    }
-
-    if(pitch == NOTE_A6) {
-      trigger_rain = 0;
     }
 
     if(pitch == NOTE_B6) {
