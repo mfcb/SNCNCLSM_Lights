@@ -224,28 +224,6 @@ void loop() {
 //
 
 void output() {
-  if(trigger_reset) {
-    for(int i = 0; i<NUM_LEDS;i++) {
-      leds[i] = CRGB(0,0,0);
-      leds_STM[i] = CRGB(0,0,0);
-    }
-    trigger_ambience = 0;
-    trigger_gradient = 0;
-    trigger_flash = 0;
-    trigger_flashColor = 0;
-    trigger_randomSegment = 0;
-    trigger_sineLine = false;
-    trigger_pingPongLine = false;
-   for(int i = 0; i<NUM_SABERS;i++) {
-      trigger_sabersToFill[i] = 0;
-      //fade switches
-      trigger_sabersToFadeIn[i] = 0;
-   }
-    
-    //don't repeat
-    trigger_reset = false;
-    return;
-  }
   if(trigger_allBlack) {
     for(int i = 0; i<NUM_LEDS;i++) {
       leds[i] = CRGB(0,0,0);
@@ -349,7 +327,7 @@ void output() {
   //SHORT TERM MEMORY
   addSTM();
   
-//  fadeSTM();
+  fadeSTM();
 
   if(trigger_ambience.getLuma() >= 0 && trigger_fadeAmbience == true) {
     trigger_ambience.nscale8(192);
@@ -717,10 +695,6 @@ CRGB getWhite(byte velocity) {
 
 void HandleNoteOn(byte channel, byte pitch, byte velocity) {
   velocity = map(velocity,1,127,2,255);
-  //RESET
-  if(pitch == NOTE_C_MINUS1) {
-    trigger_reset = true;
-  }
   //PANIC
   if(pitch == NOTE_C0) {
     trigger_allBlack = true;
@@ -728,6 +702,12 @@ void HandleNoteOn(byte channel, byte pitch, byte velocity) {
   //BRIGHTNESS OVERRIDE
   if(pitch == NOTE_D0) { 
     FastLED.setBrightness(velocity);
+  }
+  //RESET
+  if(pitch == NOTE_E0) { 
+    trigger_allBlack = true;
+    FastLED.setBrightness ( DEFAULT_BRIGHTNESS );
+    globalFadeSpeed = DEFAULT_FADE_SPEED;
   }
 
   //FADE SPEED OVERRIDE
